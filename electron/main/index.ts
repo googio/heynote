@@ -1,16 +1,15 @@
-import { app, BrowserWindow, shell, ipcMain, Menu, nativeTheme, globalShortcut } from 'electron'
+import { app, BrowserWindow, Tray, shell, ipcMain, Menu, nativeTheme, globalShortcut, nativeImage } from 'electron'
 import { release } from 'node:os'
 import { join } from 'node:path'
-import * as jetpack from "fs-jetpack";
+import fs from "fs"
 
-import menu from './menu'
-import { initialContent, initialDevContent } from '../initial-content'
+import { menu, getTrayMenu } from './menu'
 import { WINDOW_CLOSE_EVENT, SETTINGS_CHANGE_EVENT } from '../constants';
 import CONFIG from "../config"
-import { onBeforeInputEvent } from "../keymap"
-import { isMac } from '../detect-platform';
+import { isDev, isLinux, isMac, isWindows } from '../detect-platform';
 import { initializeAutoUpdate, checkForUpdates } from './auto-update';
 import { fixElectronCors } from './cors';
+import { loadBuffer, contentSaved } from './buffer';
 
 
 // The built directory structure
@@ -33,7 +32,7 @@ process.env.PUBLIC = process.env.VITE_DEV_SERVER_URL
 if (release().startsWith('6.1')) app.disableHardwareAcceleration()
 
 // Set application name for Windows 10+ notifications
-if (process.platform === 'win32') app.setAppUserModelId(app.getName())
+if (isWindows) app.setAppUserModelId(app.getName())
 
 if (!process.env.VITE_DEV_SERVER_URL && !app.requestSingleInstanceLock()) {
     app.quit()
@@ -50,19 +49,27 @@ Menu.setApplicationMenu(menu)
 // process.env['ELECTRON_DISABLE_SECURITY_WARNINGS'] = 'true'
 
 export let win: BrowserWindow | null = null
+let tray: Tray | null = null;
 // Here, you can also use other preload
 const preload = join(__dirname, '../preload/index.js')
 const url = process.env.VITE_DEV_SERVER_URL
 const indexHtml = join(process.env.DIST, 'index.html')
-const isDev = !!process.env.VITE_DEV_SERVER_URL
 
 let currentKeymap = CONFIG.get("settings.keymap")
-let contentSaved = false
 
 // if this version is a beta version, set the release channel to beta
 const isBetaVersion = app.getVersion().includes("beta")
 if (isBetaVersion) {
     CONFIG.set("settings.allowBetaVersions", true)
+}
+
+let forceQuit = false
+export function setForceQuit() {
+    forceQuit = true
+}
+export function quit() {
+    setForceQuit()
+    app.quit()
 }
 
 
@@ -89,7 +96,6 @@ async function createWindow() {
             nodeIntegration: true,
             contextIsolation: true,
         },
-
     }, windowConfig))
 
     // maximize window if it was maximized last time
@@ -101,6 +107,11 @@ async function createWindow() {
     }
 
     win.on("close", (event) => {
+        if (!forceQuit && CONFIG.get("settings.showInMenu")) {
+            event.preventDefault()
+            win.hide()
+            return
+        }
         // Prevent the window from closing, and send a message to the renderer which will in turn
         // send a message to the main process to save the current buffer and close the window.
         if (!contentSaved) {
@@ -116,6 +127,18 @@ async function createWindow() {
         }
     })
 
+    win.on("hide", () => {
+        if (isWindows && CONFIG.get("settings.showInMenu")) {
+            win.setSkipTaskbar(true)
+        }
+    })
+
+    win.on("show", () => {
+        if (isWindows && CONFIG.get("settings.showInMenu")) {
+            win.setSkipTaskbar(false)
+        }
+    })
+
     nativeTheme.themeSource = CONFIG.get("theme")
 
     if (process.env.VITE_DEV_SERVER_URL) { // electron-vite-vue#298
@@ -126,11 +149,6 @@ async function createWindow() {
         win.loadFile(indexHtml)
         //win.webContents.openDevTools()
     }
-    
-    // custom keyboard shortcuts for Emacs keybindings
-    win.webContents.on("before-input-event", function (event, input) {
-        onBeforeInputEvent({event, input, win, currentKeymap})
-    })
 
     // Test actively push message to the Electron-Renderer
     win.webContents.on('did-finish-load', () => {
@@ -138,14 +156,33 @@ async function createWindow() {
     })
 
     // Make all links open with the browser, not with the application
-    win.webContents.setWindowOpenHandler(({ url }) => {
+    win.webContents.setWindowOpenHandler(({url}) => {
         if (url.startsWith('https:') || url.startsWith('http:')) {
             shell.openExternal(url)
         }
-        return { action: 'deny' }
+        return {action: 'deny'}
     })
 
     fixElectronCors(win)
+}
+
+function createTray() {
+    let img
+    if (isMac) {
+        img = nativeImage.createFromPath(join(process.env.PUBLIC, "iconTemplate.png"))
+    } else if (isLinux) {
+        img = nativeImage.createFromPath(join(process.env.PUBLIC, 'favicon-linux.png'));
+    } else{
+        img = nativeImage.createFromPath(join(process.env.PUBLIC, 'favicon.ico'));
+    }
+    tray = new Tray(img);
+    tray.setToolTip("Heynote");
+    tray.setContextMenu(getTrayMenu(win));
+    tray.addListener("click", () => {
+        if (!isMac) {
+            win?.show()
+        }
+    })
 }
 
 function registerGlobalHotkey() {
@@ -159,15 +196,25 @@ function registerGlobalHotkey() {
                 if (win.isFocused()) {
                     if (!!app.hide) {
                         // app.hide() only available on macOS
+                        // We want to use app.hide() so that the menu bar also gets changed
                         app?.hide()
                     } else {
                         win.blur()
+                        if (CONFIG.get("settings.showInMenu")) {
+                            // if we're using a tray icon we want to completely hide the window
+                            win.hide()
+                        }
                     }
                 } else {
                     app.focus({steal: true})
                     if (win.isMinimized()) {
                         win.restore()
                     }
+                    if (!win.isVisible()) {
+                        win.show()
+                    }
+                    
+                    win.focus()
                 }
             })
         } catch (error) {
@@ -176,14 +223,42 @@ function registerGlobalHotkey() {
     }
 }
 
+function registerShowInDock() {
+    // dock is only available on macOS
+    if (isMac) {
+        if (CONFIG.get("settings.showInDock")) {
+            app.dock.show().catch((error) => {
+                console.log("Could not show app in dock: ", error);
+            });
+        } else {
+            app.dock.hide();
+        }
+    }
+}
+
+function registerShowInMenu() {
+    if (CONFIG.get("settings.showInMenu")) {
+        createTray()
+    } else {
+        tray?.destroy()
+    }
+}
+
 app.whenReady().then(createWindow).then(async () => {
     initializeAutoUpdate(win)
     registerGlobalHotkey()
+    registerShowInDock()
+    registerShowInMenu()
+})
+
+app.on("before-quit", () => {
+    // if CMD+Q is pressed, we want to quit the app even if we're using a Menu/Tray icon
+    setForceQuit()
 })
 
 app.on('window-all-closed', () => {
     win = null
-    if (process.platform !== 'darwin') app.quit()
+    if (!isMac) app.quit()
 })
 
 app.on('second-instance', () => {
@@ -210,44 +285,35 @@ ipcMain.handle('dark-mode:set', (event, mode) => {
 
 ipcMain.handle('dark-mode:get', () => nativeTheme.themeSource)
 
-const bufferPath = isDev ? join(app.getPath("userData"), "buffer-dev.txt") : join(app.getPath("userData"), "buffer.txt")
+// load buffer on app start
+loadBuffer()
 
-ipcMain.handle('buffer-content:load', async () =>  {
-    if (jetpack.exists(bufferPath) === "file") {
-        return await jetpack.read(bufferPath, 'utf8')
-    } else {
-        return isDev? initialDevContent : initialContent
-    }
-});
 
-async function save(content) {
-    return await jetpack.write(bufferPath, content, {
-        atomic: true,
-        mode: '600',
-    })
-}
-
-ipcMain.handle('buffer-content:save', async (event, content) =>  {
-    return await save(content)
-});
-
-ipcMain.handle('buffer-content:saveAndQuit', async (event, content) => {
-    await save(content)
-    contentSaved = true
-    app.quit()
-})
-
-ipcMain.handle('settings:set', (event, settings) =>  {
+ipcMain.handle('settings:set', async (event, settings) => {
     if (settings.keymap !== CONFIG.get("settings.keymap")) {
         currentKeymap = settings.keymap
     }
     let globalHotkeyChanged = settings.enableGlobalHotkey !== CONFIG.get("settings.enableGlobalHotkey") || settings.globalHotkey !== CONFIG.get("settings.globalHotkey")
-    
+    let showInDockChanged = settings.showInDock !== CONFIG.get("settings.showInDock");
+    let showInMenuChanged = settings.showInMenu !== CONFIG.get("settings.showInMenu");
+    let bufferPathChanged = settings.bufferPath !== CONFIG.get("settings.bufferPath");
     CONFIG.set("settings", settings)
 
     win?.webContents.send(SETTINGS_CHANGE_EVENT, settings)
-    
+
     if (globalHotkeyChanged) {
         registerGlobalHotkey()
+    }
+    if (showInDockChanged) {
+        registerShowInDock()
+    }
+    if (showInMenuChanged) {
+        registerShowInMenu()
+    }
+    if (bufferPathChanged) {
+        const buffer = loadBuffer()
+        if (buffer.exists()) {
+            win?.webContents.send("buffer-content:change", await buffer.load())
+        }
     }
 })

@@ -19,9 +19,9 @@
                 selectionSize: 0,
                 language: "plaintext",
                 languageAuto: true,
-                theme: window.darkMode.initial,
-                initialTheme: window.darkMode.initial,
-                systemTheme: 'system',
+                theme: window.heynote.themeMode.initial,
+                initialTheme: window.heynote.themeMode.initial,
+                themeSetting: 'system',
                 development: window.location.href.indexOf("dev=1") !== -1,
                 showLanguageSelector: false,
                 showSettings: false,
@@ -30,13 +30,20 @@
         },
 
         mounted() {
-            window.darkMode.get().then((mode) => {
+            window.heynote.themeMode.get().then((mode) => {
                 this.theme = mode.computed
-                this.systemTheme = mode.theme
+                this.themeSetting = mode.theme
             })
-            window.darkMode.onChange((theme) => {
+            const onThemeChange = (theme) => {
                 this.theme = theme
-            })
+                if (theme === "system") {
+                    document.body.setAttribute("theme", window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+                } else {
+                    document.body.setAttribute("theme", theme)
+                }
+            }
+            onThemeChange(window.heynote.themeMode.initial)
+            window.heynote.themeMode.onChange(onThemeChange)
             window.heynote.onSettingsChange((settings) => {
                 this.settings = settings
             })
@@ -46,7 +53,7 @@
         },
 
         beforeUnmount() {
-            window.darkMode.removeListener()
+            window.heynote.themeMode.removeListener()
         },
 
         methods: {
@@ -62,12 +69,12 @@
                 let newTheme
                 // when the "system" theme is used, make sure that the first click always results in amn actual theme change
                 if (this.initialTheme === "light") {
-                    newTheme = this.systemTheme === "system" ? "dark" : (this.systemTheme === "dark" ? "light" : "system")
+                    newTheme = this.themeSetting === "system" ? "dark" : (this.themeSetting === "dark" ? "light" : "system")
                 } else {
-                    newTheme = this.systemTheme === "system" ? "light" : (this.systemTheme === "light" ? "dark" : "system")
+                    newTheme = this.themeSetting === "system" ? "light" : (this.themeSetting === "light" ? "dark" : "system")
                 }
-                window.darkMode.set(newTheme)
-                this.systemTheme = newTheme
+                window.heynote.themeMode.set(newTheme)
+                this.themeSetting = newTheme
                 this.$refs.editor.focus()
             },
 
@@ -109,8 +116,10 @@
             :development="development"
             :debugSyntaxTree="false"
             :keymap="settings.keymap"
+            :emacsMetaKey="settings.emacsMetaKey"
             :showLineNumberGutter="settings.showLineNumberGutter"
             :showFoldGutter="settings.showFoldGutter"
+            :bracketClosing="settings.bracketClosing"
             class="editor"
             ref="editor"
             @openLanguageSelector="openLanguageSelector"
@@ -122,11 +131,13 @@
             :language="language" 
             :languageAuto="languageAuto"
             :theme="theme"
-            :systemTheme="systemTheme"
+            :themeSetting="themeSetting"
+            :autoUpdate="settings.autoUpdate"
             :allowBetaVersions="settings.allowBetaVersions"
             @toggleTheme="toggleTheme"
             @openLanguageSelector="openLanguageSelector"
             @formatCurrentBlock="formatCurrentBlock"
+            @openSettings="showSettings = true"
             class="status" 
         />
         <div class="overlay">

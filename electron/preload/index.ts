@@ -1,5 +1,5 @@
 const { contextBridge } = require('electron')
-import darkMode from "./theme-mode"
+import themeMode from "./theme-mode"
 import { isMac, isWindows, isLinux } from "../detect-platform"
 import { ipcRenderer } from "electron"
 import { 
@@ -18,8 +18,6 @@ import {
 import CONFIG from "../config"
 import getCurrencyData from "./currency"
 
-//contextBridge.exposeInMainWorld("platform", )
-contextBridge.exposeInMainWorld("darkMode", darkMode)
 
 contextBridge.exposeInMainWorld("heynote", {
     platform: {
@@ -27,6 +25,9 @@ contextBridge.exposeInMainWorld("heynote", {
         isWindows,
         isLinux,
     },
+    isWebApp: false,
+
+    themeMode: themeMode,
 
     quit() {
         console.log("quitting")
@@ -53,6 +54,14 @@ contextBridge.exposeInMainWorld("heynote", {
         async saveAndQuit(content) {
             return await ipcRenderer.invoke("buffer-content:saveAndQuit", content)
         },
+
+        onChangeCallback(callback) {
+            ipcRenderer.on("buffer-content:change", callback)
+        },
+
+        async selectLocation() {
+            return await ipcRenderer.invoke("buffer-content:selectLocation")
+        }
     },
 
     settings: CONFIG.get("settings"),

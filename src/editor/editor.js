@@ -2,18 +2,20 @@ import { Annotation, EditorState, Compartment } from "@codemirror/state"
 import { EditorView, keymap, drawSelection, ViewPlugin, lineNumbers } from "@codemirror/view"
 import { indentUnit, forceParsing, foldGutter } from "@codemirror/language"
 import { markdown } from "@codemirror/lang-markdown"
+import { closeBrackets } from "@codemirror/autocomplete";
 
 import { heynoteLight } from "./theme/light.js"
 import { heynoteDark } from "./theme/dark.js"
 import { heynoteBase } from "./theme/base.js"
 import { customSetup } from "./setup.js"
 import { heynoteLang } from "./lang-heynote/heynote.js"
-import { noteBlockExtension, blockLineNumbers } from "./block/block.js"
+import { noteBlockExtension, blockLineNumbers, blockState } from "./block/block.js"
+import { heynoteEvent, SET_CONTENT } from "./annotation.js";
 import { changeCurrentBlockLanguage, triggerCurrenciesLoaded } from "./block/commands.js"
 import { formatBlockContent } from "./block/format-code.js"
 import { heynoteKeymap } from "./keymap.js"
 import { emacsKeymap } from "./emacs.js"
-import { heynoteCopyPaste } from "./copy-paste"
+import { heynoteCopyCut } from "./copy-paste"
 import { languageDetection } from "./language-detection/autodetect.js"
 import { autoSaveContent } from "./save.js"
 import { todoCheckboxPlugin} from "./todo-checkbox.ts"
@@ -38,8 +40,10 @@ export class HeynoteEditor {
         theme="light", 
         saveFunction=null, 
         keymap="default", 
+        emacsMetaKey,
         showLineNumberGutter=true, 
         showFoldGutter=true,
+        bracketClosing=false,
     }) {
         this.element = element
         this.themeCompartment = new Compartment
@@ -47,18 +51,25 @@ export class HeynoteEditor {
         this.lineNumberCompartmentPre = new Compartment
         this.lineNumberCompartment = new Compartment
         this.foldGutterCompartment = new Compartment
+        this.readOnlyCompartment = new Compartment
+        this.closeBracketsCompartment = new Compartment
         this.deselectOnCopy = keymap === "emacs"
+        this.emacsMetaKey = emacsMetaKey
 
         const state = EditorState.create({
             doc: content || "",
             extensions: [
                 this.keymapCompartment.of(getKeymapExtensions(this, keymap)),
-                heynoteCopyPaste(this),
+                heynoteCopyCut(this),
 
                 //minimalSetup,
                 this.lineNumberCompartment.of(showLineNumberGutter ? [lineNumbers(), blockLineNumbers] : []),
                 customSetup, 
                 this.foldGutterCompartment.of(showFoldGutter ? [foldGutter()] : []),
+
+                this.closeBracketsCompartment.of(bracketClosing ? [closeBrackets()] : []),
+
+                this.readOnlyCompartment.of([]),
                 
                 this.themeCompartment.of(theme === "dark" ? heynoteDark : heynoteLight),
                 heynoteBase,
@@ -86,6 +97,13 @@ export class HeynoteEditor {
             ],
         })
 
+        // make sure saveFunction is called when page is unloaded
+        if (saveFunction) {
+            window.addEventListener("beforeunload", () => {
+                saveFunction(this.getContent())
+            })
+        }
+
         this.view = new EditorView({
             state: state,
             parent: element,
@@ -104,8 +122,37 @@ export class HeynoteEditor {
         return this.view.state.sliceDoc()
     }
 
+    setContent(content) {
+        this.view.dispatch({
+            changes: {
+                from: 0,
+                to: this.view.state.doc.length,
+                insert: content,
+            },
+            annotations: [heynoteEvent.of(SET_CONTENT)],
+        })
+        this.view.dispatch({
+            selection: {anchor: this.view.state.doc.length, head: this.view.state.doc.length},
+            scrollIntoView: true,
+        })
+    }
+
+    getBlocks() {
+        return this.view.state.facet(blockState)
+    }
+
+    getCursorPosition() {
+        return this.view.state.selection.main.head
+    }
+
     focus() {
         this.view.focus()
+    }
+
+    setReadOnly(readOnly) {
+        this.view.dispatch({
+            effects: this.readOnlyCompartment.reconfigure(readOnly ? [EditorState.readOnly.of(true)] : []),
+        })
     }
 
     setTheme(theme) {
@@ -114,8 +161,9 @@ export class HeynoteEditor {
         })
     }
 
-    setKeymap(keymap) {
+    setKeymap(keymap, emacsMetaKey) {
         this.deselectOnCopy = keymap === "emacs"
+        this.emacsMetaKey = emacsMetaKey
         this.view.dispatch({
             effects: this.keymapCompartment.reconfigure(getKeymapExtensions(this, keymap)),
         })
@@ -138,6 +186,12 @@ export class HeynoteEditor {
     setFoldGutter(show) {
         this.view.dispatch({
             effects: this.foldGutterCompartment.reconfigure(show ? [foldGutter()] : []),
+        })
+    }
+
+    setBracketClosing(value) {
+        this.view.dispatch({
+            effects: this.closeBracketsCompartment.reconfigure(value ? [closeBrackets()] : []),
         })
     }
 

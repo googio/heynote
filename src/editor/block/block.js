@@ -13,9 +13,9 @@ import { emptyBlockSelected } from "./select-all.js";
 // tracks the size of the first delimiter
 let firstBlockDelimiterSize
 
-function getBlocks(state) {
+function getBlocks(state, timeout=50) {
     const blocks = [];  
-    const tree = ensureSyntaxTree(state, state.doc.length)
+    const tree = ensureSyntaxTree(state, state.doc.length, timeout)
     if (tree) {
         tree.iterate({
             enter: (type) => {
@@ -57,16 +57,14 @@ function getBlocks(state) {
 
 export const blockState = StateField.define({
     create(state) {
-        return getBlocks(state);
+        return getBlocks(state, 1000);
     },
     update(blocks, transaction) {
         // if blocks are empty it likely means we didn't get a parsed syntax tree, and then we want to update
         // the blocks on all updates (and not just document changes)
         if (transaction.docChanged || blocks.length === 0) {
-            //console.log("updating block state", transaction)
             return getBlocks(transaction.state);
         }
-        //return widgets.map(transaction.changes);
         return blocks
     },
 })
@@ -75,6 +73,14 @@ export function getActiveNoteBlock(state) {
     // find which block the cursor is in
     const range = state.selection.asSingle().ranges[0]
     return state.facet(blockState).find(block => block.range.from <= range.head && block.range.to >= range.head)
+}
+
+export function getFirstNoteBlock(state) {
+    return state.facet(blockState)[0]
+}
+
+export function getLastNoteBlock(state) {
+    return state.facet(blockState)[state.facet(blockState).length - 1]
 }
 
 export function getNoteBlockFromPos(state, pos) {
@@ -88,8 +94,7 @@ class NoteBlockStart extends WidgetType {
         this.isFirst = isFirst
     }
     eq(other) {
-        //return other.checked == this.checked
-        return true
+        return this.isFirst === other.isFirst
     }
     toDOM() {
         let wrap = document.createElement("div")
@@ -251,7 +256,7 @@ const preventFirstBlockFromBeingDeleted = EditorState.changeFilter.of((tr) => {
  * Transaction filter to prevent the selection from being before the first block
   */
 const preventSelectionBeforeFirstBlock = EditorState.transactionFilter.of((tr) => {
-    if (!firstBlockDelimiterSize) {
+    if (!firstBlockDelimiterSize || tr.annotations.some(a => a.type === heynoteEvent)) {
         return tr
     }
     tr?.selection?.ranges.forEach(range => {

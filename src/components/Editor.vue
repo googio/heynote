@@ -11,6 +11,10 @@
                 type: String,
                 default: "default",
             },
+            emacsMetaKey: {
+                type: String,
+                default: "alt",
+            },
             showLineNumberGutter: {
                 type: Boolean,
                 default: true,
@@ -19,7 +23,13 @@
                 type: Boolean,
                 default: true,
             },
+            bracketClosing: {
+                type: Boolean,
+                default: false,
+            },
         },
+
+        components: {},
 
         data() {
             return {
@@ -44,18 +54,32 @@
 
             // load buffer content and create editor
             window.heynote.buffer.load().then((content) => {
+                let diskContent = content
                 this.editor = new HeynoteEditor({
                     element: this.$refs.editor,
                     content: content,
                     theme: this.theme,
                     saveFunction: (content) => {
+                        if (content === diskContent) {
+                            return
+                        }
+                        diskContent = content
                         window.heynote.buffer.save(content)
                     },
                     keymap: this.keymap,
+                    emacsMetaKey: this.emacsMetaKey,
                     showLineNumberGutter: this.showLineNumberGutter,
                     showFoldGutter: this.showFoldGutter,
+                    bracketClosing: this.bracketClosing,
                 })
+                window._heynote_editor = this.editor
                 window.document.addEventListener("currenciesLoaded", this.onCurrenciesLoaded)
+
+                // set up buffer change listener
+                window.heynote.buffer.onChangeCallback((event, content) => {
+                    diskContent = content
+                    this.editor.setContent(content)
+                })
             })
             // set up window close handler that will save the buffer and quit
             window.heynote.onWindowClose(() => {
@@ -91,8 +115,12 @@
                 this.editor.setTheme(newTheme)
             },
 
-            keymap(keymap) {
-                this.editor.setKeymap(keymap)
+            keymap() {
+                this.editor.setKeymap(this.keymap, this.emacsMetaKey)
+            },
+
+            emacsMetaKey() {
+                this.editor.setKeymap(this.keymap, this.emacsMetaKey)
             },
 
             showLineNumberGutter(show) {
@@ -101,6 +129,10 @@
 
             showFoldGutter(show) {
                 this.editor.setFoldGutter(show)
+            },
+
+            bracketClosing(value) {
+                this.editor.setBracketClosing(value)
             },
         },
 
@@ -141,7 +173,7 @@
     </div>
 </template>
 
-<style lang="sass">
+<style lang="sass" scoped>
     .debug-syntax-tree
         position: absolute
         top: 0

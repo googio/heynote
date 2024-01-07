@@ -1,6 +1,7 @@
 <script>
     export default {
         props: [
+            "autoUpdate",
             "allowBetaVersions",
         ],
         
@@ -16,7 +17,6 @@
                     total: 0.0,
                     bytesPerSecond: 0.0,
                 },
-                
                 checkForUpdateIntervalId: null,
             }
         },
@@ -50,14 +50,6 @@
                     this.updateProgress = progress
                 }
             })
-            
-            // check for update now
-            this.checkForUpdate()
-
-            // check for updates every 8 hours
-            this.checkForUpdateIntervalId = setInterval(() => {
-                this.checkForUpdate()
-            }, 1000 * 3600 * 8)
         },
 
         beforeUnmount() {
@@ -67,11 +59,27 @@
         },
 
         watch: {
-            allowBetaVersions: {
-                handler: function (newValue) {
-                    this.checkForUpdate()
+            autoUpdate: {
+                immediate: true,
+                handler(autoUpdate) {
+                    if (this.checkForUpdateIntervalId) {
+                        clearInterval(this.checkForUpdateIntervalId)
+                    }
+                    if (autoUpdate) {
+                        // check for update now
+                        this.checkForUpdate()
+                        
+                        // check for updates every 8 hours
+                        this.checkForUpdateIntervalId = setInterval(() => {
+                            this.checkForUpdate()
+                        }, 1000 * 3600 * 8)
+                    }
                 },
-            }
+            },
+
+            allowBetaVersions(newValue) {
+                this.checkForUpdate()
+            },
         },
 
         computed: {
@@ -176,14 +184,14 @@
             background-size: 14px
             background-repeat: no-repeat
             background-position: center center
-            background-image: url("icons/update.svg")
+            background-image: url("@/assets/icons/update.svg")
             animation-name: spin
             animation-duration: 2000ms
             animation-iteration-count: infinite
             animation-timing-function: linear
             animation-play-state: paused
             &.icon-download
-                background-image: url("icons/download.svg")
+                background-image: url("@/assets/icons/download.svg")
                 width: 16px
                 height: 16px
                 background-size: 16px

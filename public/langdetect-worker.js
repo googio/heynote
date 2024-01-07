@@ -4,6 +4,7 @@ GUESSLANG_LANGUAGES = [
     "json",
     "py",
     "js",
+    "ts",
     "html",
     "sql",
     "java",
@@ -13,6 +14,17 @@ GUESSLANG_LANGUAGES = [
     "xml",
     "rs",
     "md",
+    "cs",
+    "rb",
+    "sh",
+    "yaml",
+    "go",
+    "clj",
+    "erl",
+    "toml",
+    "swift",
+    "kt",
+    "groovy",
 ]
 
 const guessLang = new self.GuessLang()
@@ -26,12 +38,12 @@ onmessage = (event) => {
     // we first check some custom heuristic rules to determine if the language is JSON
     const trimmedContent = content.trim()
     if ((
-        trimmedContent.startsWith("{") && 
+        trimmedContent.startsWith("{") &&
         trimmedContent.endsWith("}")
     ) || (
-        trimmedContent.startsWith("[") &&
-        trimmedContent.endsWith("]")
-    )) {
+            trimmedContent.startsWith("[") &&
+            trimmedContent.endsWith("]")
+        )) {
         try {
             if (typeof JSON.parse(trimmedContent) === "object") {
                 postMessage({
@@ -52,7 +64,7 @@ onmessage = (event) => {
     //let startTime = performance.now()
     guessLang.runModel(content).then((result) => {
         //const duration = performance.now() - startTime
-        //console.log("Guessing language done:", result, result[0]?.languageId, result[0]?.confidence)
+        console.log("Guessing language done:", result, result[0]?.languageId, result[0]?.confidence)
         //console.log("Guessing language took", duration, "ms")
 
         if (result.length > 0) {

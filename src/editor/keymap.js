@@ -6,7 +6,8 @@ import {
 
 import { 
     insertNewBlockAtCursor, 
-    addNewBlockAfterCurrent, 
+    addNewBlockBeforeCurrent, addNewBlockAfterCurrent,
+    addNewBlockBeforeFirst, addNewBlockAfterLast,
     moveLineUp, moveLineDown, 
     selectAll, 
     gotoPreviousBlock, gotoNextBlock, 
@@ -22,7 +23,11 @@ import { formatBlockContent } from "./block/format-code.js"
 export function keymapFromSpec(specs) {
     return keymap.of(specs.map((spec) => {
         if (spec.run) {
-            return {...spec, preventDefault: true}
+            if ("preventDefault" in spec) {
+                return spec
+            } else {
+                return {...spec, preventDefault: true}
+            }
         } else {
             const [key, run] = spec
             return {
@@ -38,8 +43,11 @@ export function heynoteKeymap(editor) {
     return keymapFromSpec([
         ["Tab", indentMore],
         ["Shift-Tab", indentLess],
+        ["Alt-Shift-Enter", addNewBlockBeforeFirst],
+        ["Mod-Shift-Enter", addNewBlockAfterLast],
+        ["Alt-Enter", addNewBlockBeforeCurrent],
         ["Mod-Enter", addNewBlockAfterCurrent],
-        ["Mod-Shift-Enter", insertNewBlockAtCursor],
+        ["Mod-Alt-Enter", insertNewBlockAtCursor],
         ["Mod-a", selectAll],
         ["Alt-ArrowUp", moveLineUp],
         ["Alt-ArrowDown", moveLineDown],
